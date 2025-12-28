@@ -1,8 +1,8 @@
 
 import React, { useRef, useState } from 'react';
 import { Product, Offer } from '../types';
-import { Plus, Camera, Lock, RefreshCw, Flower2, Sprout, Gift, Star, Gem, Trash2, Wand2, Sparkles, Image as ImageIcon, Upload, Check } from 'lucide-react';
-import { generateFloralInspiration } from '../services/geminiService';
+import { Plus, Camera, Lock, RefreshCw, Flower2, Sprout, Gift, Star, Gem, Trash2, Wand2, Sparkles, Image as ImageIcon, Upload, Check, X, MessageSquarePlus, Send } from 'lucide-react';
+import { generateFloralInspiration, analyzeFloralImage, refineFloralPrompt } from '../services/geminiService';
 
 interface AdminPanelProps {
   products: Product[];
@@ -16,9 +16,9 @@ interface AdminPanelProps {
   onUpdatePassword: (newPass: string) => void;
 }
 
-export const AdminPanel: React.FC<AdminPanelProps> = ({ 
-  products, 
-  onUpdateProduct, 
+export const AdminPanel: React.FC<AdminPanelProps> = ({
+  products,
+  onUpdateProduct,
   onAddProduct,
   onResetProducts,
   adminPassword,
@@ -27,19 +27,96 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [inputPassword, setInputPassword] = useState('');
   const [activeTab, setActiveTab] = useState<'inventory' | 'studio' | 'settings'>('inventory');
-  
+
   // States for Image Handling
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editFields, setEditFields] = useState<Partial<Product>>({});
-  
+
   const [newProduct, setNewProduct] = useState<Partial<Product>>({
     name: '', description: '', price: 0, category: 'flowers', image: ''
   });
 
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // New Camera Logic
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+  const [refinementText, setRefinementText] = useState('');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const startCamera = async () => {
+    try {
+      // DEBUG: Verify API Key existence
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        alert("⚠️ CRÍTICO: No se detectó la API Key en VITE_GEMINI_API_KEY. La Inteligencia Artificial no funcionará.");
+      }
+
+      setIsCameraOpen(true);
+      setAnalysisResult(null); // Reset previous analysis
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' } // Prefer back camera on mobile
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("No se pudo acceder a la cámara. Asegúrate de dar permisos.");
+      setIsCameraOpen(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach(track => track.stop());
+    }
+    setIsCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      // Match canvas dimensions to video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.85);
+
+        // TRIGGER AI ANALYSIS
+        setIsAnalyzing(true);
+        analyzeFloralImage(base64)
+          .then(result => {
+            setAnalysisResult(result);
+            setIsAnalyzing(false);
+          })
+          .catch(err => {
+            console.error("AI Analysis failed", err);
+            setAnalysisResult("No se pudo conectar con el Arquitecto Floral.");
+            setIsAnalyzing(false);
+          });
+
+        if (editingId) {
+          setEditFields(prev => ({ ...prev, image: base64 }));
+        } else {
+          setNewProduct(prev => ({ ...prev, image: base64 }));
+        }
+        // Don't stop camera yet, let user see result or capture again
+        // stopCamera();
+      }
+    }
+  };
 
   const categories = [
     { id: 'flowers', label: 'Ramos', icon: <Flower2 size={16} /> },
@@ -57,7 +134,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const processFile = async (file: File) => {
     if (!file) return;
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -79,7 +156,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             height = MAX_SIZE;
           }
         }
-        
+
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
@@ -88,7 +165,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
           const base64 = canvas.toDataURL('image/jpeg', 0.85);
-          
+
           if (editingId) {
             setEditFields(prev => ({ ...prev, image: base64 }));
           } else {
@@ -98,7 +175,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       };
     };
     reader.readAsDataURL(file);
-    
+
     // Resetear los inputs para permitir subir la misma foto si se desea
     if (uploadInputRef.current) uploadInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
@@ -128,8 +205,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <h2 className="text-3xl font-serif font-bold text-gray-900 mb-2">Panel de Control</h2>
           <p className="text-gray-500 mb-8 font-light italic">"Solo manos autorizadas para este jardín"</p>
           <form onSubmit={handleLogin} className="space-y-4">
-            <input 
-              type="password" 
+            <input
+              type="password"
               placeholder="Contraseña Maestra"
               className="w-full px-6 py-4 bg-gray-50 border border-transparent rounded-2xl focus:bg-white focus:border-rose-300 outline-none transition-all text-center text-lg"
               value={inputPassword}
@@ -159,7 +236,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             { id: 'studio', label: 'Estudio IA', icon: <Wand2 size={16} /> },
             { id: 'settings', label: 'Seguridad', icon: <Lock size={16} /> }
           ].map(tab => (
-            <button 
+            <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === tab.id ? 'bg-rose-600 text-white shadow-md' : 'text-gray-400 hover:text-rose-600'}`}
@@ -174,155 +251,155 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         <div className="space-y-12">
           {/* New Product Form */}
           <div className="bg-white p-8 md:p-12 rounded-[3rem] border border-rose-100 shadow-xl shadow-rose-900/5 relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-8 opacity-5">
-                <Flower2 size={120} className="text-rose-900" />
-             </div>
+            <div className="absolute top-0 right-0 p-8 opacity-5">
+              <Flower2 size={120} className="text-rose-900" />
+            </div>
 
-             <h2 className="text-2xl font-serif font-bold text-gray-900 mb-8 flex items-center gap-3">
-                <Plus className="text-rose-600" /> Nuevo Producto
-             </h2>
+            <h2 className="text-2xl font-serif font-bold text-gray-900 mb-8 flex items-center gap-3">
+              <Plus className="text-rose-600" /> Nuevo Producto
+            </h2>
 
-             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-                {/* Media Capture Section */}
-                <div className="lg:col-span-4 space-y-4">
-                   <div 
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="aspect-square bg-rose-50 rounded-[2.5rem] border-2 border-dashed border-rose-200 overflow-hidden relative group cursor-pointer"
-                   >
-                      {newProduct.image ? (
-                        <img src={newProduct.image} className="w-full h-full object-cover" alt="Preview" />
-                      ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-                           <ImageIcon size={48} className="text-rose-200 mb-4" />
-                           <p className="text-xs font-bold text-rose-300 uppercase tracking-widest">Toca para Tomar Foto</p>
-                        </div>
-                      )}
-                      
-                      <div className="absolute inset-0 bg-rose-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                         <div className="p-4 bg-white text-rose-600 rounded-full hover:scale-110 transition-transform shadow-xl">
-                            <Camera size={24} />
-                         </div>
-                      </div>
-                   </div>
-                   
-                   <div className="grid grid-cols-2 gap-3">
-                      <button 
-                        onClick={() => cameraInputRef.current?.click()}
-                        className="flex items-center justify-center gap-2 py-3 px-4 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-colors shadow-lg shadow-rose-200"
-                      >
-                         <Camera size={14} /> Tomar Foto
-                      </button>
-                      <button 
-                        onClick={() => uploadInputRef.current?.click()}
-                        className="flex items-center justify-center gap-2 py-3 px-4 bg-rose-50 text-rose-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-colors"
-                      >
-                         <Upload size={14} /> Galería
-                      </button>
-                   </div>
-                   <p className="text-[10px] text-gray-400 text-center uppercase tracking-widest font-bold">Resonancia floral en cada captura</p>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+              {/* Media Capture Section */}
+              <div className="lg:col-span-4 space-y-4">
+                <div
+                  onClick={startCamera}
+                  className="aspect-square bg-rose-50 rounded-[2.5rem] border-2 border-dashed border-rose-200 overflow-hidden relative group cursor-pointer"
+                >
+                  {newProduct.image ? (
+                    <img src={newProduct.image} className="w-full h-full object-cover" alt="Preview" />
+                  ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
+                      <ImageIcon size={48} className="text-rose-200 mb-4" />
+                      <p className="text-xs font-bold text-rose-300 uppercase tracking-widest">Toca para Tomar Foto</p>
+                    </div>
+                  )}
+
+                  <div className="absolute inset-0 bg-rose-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                    <div className="p-4 bg-white text-rose-600 rounded-full hover:scale-110 transition-transform shadow-xl">
+                      <Camera size={24} />
+                    </div>
+                  </div>
                 </div>
 
-                {/* Info Section */}
-                <div className="lg:col-span-8 space-y-6">
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Nombre Comercial</label>
-                        <input 
-                          className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-rose-200 outline-none transition-all"
-                          placeholder="Ej. Ramo Amanecer Rosa"
-                          value={newProduct.name}
-                          onChange={e => setNewProduct({...newProduct, name: e.target.value})}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Precio sugerido (COP)</label>
-                        <input 
-                          type="number"
-                          className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-rose-200 outline-none transition-all"
-                          placeholder="0.00"
-                          value={newProduct.price || ''}
-                          onChange={e => setNewProduct({...newProduct, price: Number(e.target.value)})}
-                        />
-                      </div>
-                   </div>
-
-                   <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Descripción del Arreglo</label>
-                      <textarea 
-                        className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-rose-200 outline-none transition-all h-24 resize-none"
-                        placeholder="Cuenta la historia detrás de estas flores..."
-                        value={newProduct.description}
-                        onChange={e => setNewProduct({...newProduct, description: e.target.value})}
-                      />
-                   </div>
-
-                   <div className="space-y-4">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Categoría</label>
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                        {categories.map((cat) => (
-                          <button
-                            key={cat.id}
-                            onClick={() => setNewProduct({...newProduct, category: cat.id as any})}
-                            className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${newProduct.category === cat.id ? 'border-rose-600 bg-rose-50 text-rose-600' : 'border-transparent bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
-                          >
-                            {cat.icon}
-                            <span className="text-[9px] font-black uppercase tracking-tighter text-center">{cat.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                   </div>
-
-                   <button 
-                    onClick={() => {
-                      if (newProduct.name && newProduct.price && newProduct.image) {
-                        onAddProduct({
-                          id: Date.now().toString(),
-                          ...newProduct as Product
-                        });
-                        setNewProduct({ name: '', description: '', price: 0, category: 'flowers', image: '' });
-                      } else {
-                        alert("Completa todos los datos y la imagen antes de publicar.");
-                      }
-                    }}
-                    className="w-full bg-rose-950 text-white py-5 rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl shadow-rose-950/20 hover:bg-rose-900 transition-all flex items-center justify-center gap-3 active:scale-95"
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={startCamera}
+                    className="flex items-center justify-center gap-2 py-3 px-4 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-colors shadow-lg shadow-rose-200"
                   >
-                    <Check size={20} /> Publicar en la Web
+                    <Camera size={14} /> Tomar Foto
+                  </button>
+                  <button
+                    onClick={() => uploadInputRef.current?.click()}
+                    className="flex items-center justify-center gap-2 py-3 px-4 bg-rose-50 text-rose-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-colors"
+                  >
+                    <Upload size={14} /> Galería
                   </button>
                 </div>
-             </div>
+                <p className="text-[10px] text-gray-400 text-center uppercase tracking-widest font-bold">Resonancia floral en cada captura</p>
+              </div>
+
+              {/* Info Section */}
+              <div className="lg:col-span-8 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Nombre Comercial</label>
+                    <input
+                      className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-rose-200 outline-none transition-all"
+                      placeholder="Ej. Ramo Amanecer Rosa"
+                      value={newProduct.name}
+                      onChange={e => setNewProduct({ ...newProduct, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Precio sugerido (COP)</label>
+                    <input
+                      type="number"
+                      className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-rose-200 outline-none transition-all"
+                      placeholder="0.00"
+                      value={newProduct.price || ''}
+                      onChange={e => setNewProduct({ ...newProduct, price: Number(e.target.value) })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Descripción del Arreglo</label>
+                  <textarea
+                    className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-rose-200 outline-none transition-all h-24 resize-none"
+                    placeholder="Cuenta la historia detrás de estas flores..."
+                    value={newProduct.description}
+                    onChange={e => setNewProduct({ ...newProduct, description: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Categoría</label>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setNewProduct({ ...newProduct, category: cat.id as any })}
+                        className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${newProduct.category === cat.id ? 'border-rose-600 bg-rose-50 text-rose-600' : 'border-transparent bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
+                      >
+                        {cat.icon}
+                        <span className="text-[9px] font-black uppercase tracking-tighter text-center">{cat.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (newProduct.name && newProduct.price && newProduct.image) {
+                      onAddProduct({
+                        id: Date.now().toString(),
+                        ...newProduct as Product
+                      });
+                      setNewProduct({ name: '', description: '', price: 0, category: 'flowers', image: '' });
+                    } else {
+                      alert("Completa todos los datos y la imagen antes de publicar.");
+                    }
+                  }}
+                  className="w-full bg-rose-950 text-white py-5 rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl shadow-rose-950/20 hover:bg-rose-900 transition-all flex items-center justify-center gap-3 active:scale-95"
+                >
+                  <Check size={20} /> Publicar en la Web
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Catalog Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-             {products.map(product => (
-               <div key={product.id} className="bg-white rounded-3xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-xl transition-all group flex flex-col">
-                  <div className="h-48 relative overflow-hidden">
-                    <img src={product.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={product.name} />
-                    <div className="absolute top-3 right-3">
-                       <button 
-                         onClick={() => confirm('¿Eliminar del catálogo?') && onUpdateProduct({...product, id: 'DELETE_ME'} as any)}
-                         className="p-2 bg-white/20 backdrop-blur-md text-white hover:bg-rose-600 rounded-full transition-colors"
-                       >
-                          <Trash2 size={14} />
-                       </button>
-                    </div>
+            {products.map(product => (
+              <div key={product.id} className="bg-white rounded-3xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-xl transition-all group flex flex-col">
+                <div className="h-48 relative overflow-hidden">
+                  <img src={product.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={product.name} />
+                  <div className="absolute top-3 right-3">
+                    <button
+                      onClick={() => confirm('¿Eliminar del catálogo?') && onUpdateProduct({ ...product, id: 'DELETE_ME' } as any)}
+                      className="p-2 bg-white/20 backdrop-blur-md text-white hover:bg-rose-600 rounded-full transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
-                  <div className="p-5 flex-1 flex flex-col">
-                    <h3 className="font-serif font-bold text-gray-900 mb-1 line-clamp-1">{product.name}</h3>
-                    <p className="text-rose-600 font-bold text-sm mb-4">${product.price.toLocaleString()}</p>
-                    <div className="mt-auto flex gap-2">
-                       <span className="flex-1 px-3 py-1.5 bg-gray-50 rounded-lg text-[9px] font-black uppercase tracking-widest text-gray-400 flex items-center justify-center gap-2">
-                         {categories.find(c => c.id === product.category)?.icon}
-                         {categories.find(c => c.id === product.category)?.label}
-                       </span>
-                    </div>
+                </div>
+                <div className="p-5 flex-1 flex flex-col">
+                  <h3 className="font-serif font-bold text-gray-900 mb-1 line-clamp-1">{product.name}</h3>
+                  <p className="text-rose-600 font-bold text-sm mb-4">${product.price.toLocaleString()}</p>
+                  <div className="mt-auto flex gap-2">
+                    <span className="flex-1 px-3 py-1.5 bg-gray-50 rounded-lg text-[9px] font-black uppercase tracking-widest text-gray-400 flex items-center justify-center gap-2">
+                      {categories.find(c => c.id === product.category)?.icon}
+                      {categories.find(c => c.id === product.category)?.label}
+                    </span>
                   </div>
-               </div>
-             ))}
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="flex justify-center pt-8">
-            <button 
+            <button
               onClick={() => confirm('¿Restaurar inventario?') && onResetProducts()}
               className="text-gray-300 hover:text-rose-400 text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-2"
             >
@@ -334,50 +411,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {activeTab === 'studio' && (
         <div className="max-w-4xl mx-auto animate-fade-in-up">
-           <div className="bg-rose-950 p-10 md:p-16 rounded-[4rem] text-center text-white relative overflow-hidden shadow-2xl">
-              <div className="absolute inset-0 opacity-10 pointer-events-none">
-                 <div className="absolute top-0 left-0 w-full h-full" style={{backgroundImage: 'radial-gradient(white 1px, transparent 0px)', backgroundSize: '40px 40px'}}></div>
-              </div>
-              
-              <div className="relative z-10">
-                 <div className="inline-flex p-4 bg-white/10 backdrop-blur-md rounded-full mb-8 text-rose-300 border border-white/20">
-                    <Wand2 size={40} className="animate-pulse" />
-                 </div>
-                 <h2 className="text-4xl md:text-5xl font-serif font-bold mb-6">Estudio Creativo IA</h2>
-                 <p className="text-rose-200 max-w-xl mx-auto mb-12 font-light italic text-lg leading-relaxed">
-                   "Describe el arreglo de tus sueños y nuestra IA generará una imagen profesional para tu tienda."
-                 </p>
+          <div className="bg-rose-950 p-10 md:p-16 rounded-[4rem] text-center text-white relative overflow-hidden shadow-2xl">
+            <div className="absolute inset-0 opacity-10 pointer-events-none">
+              <div className="absolute top-0 left-0 w-full h-full" style={{ backgroundImage: 'radial-gradient(white 1px, transparent 0px)', backgroundSize: '40px 40px' }}></div>
+            </div>
 
-                 <div className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 space-y-6">
-                    <textarea 
-                      className="w-full bg-transparent border-none text-white text-xl font-light placeholder:text-white/20 outline-none resize-none h-32"
-                      placeholder="Ej. Un bouquet de rosas preservadas azules y plateadas en una caja de lujo negra con cintas de terciopelo..."
-                      value={aiPrompt}
-                      onChange={e => setAiPrompt(e.target.value)}
-                    />
-                    
-                    <button 
-                      onClick={handleAiInspiration}
-                      disabled={isGenerating || !aiPrompt}
-                      className="w-full py-5 bg-white text-rose-900 rounded-[2rem] font-black uppercase tracking-[0.3em] hover:bg-rose-100 transition-all shadow-xl disabled:opacity-50 flex items-center justify-center gap-3 active:scale-95"
-                    >
-                      {isGenerating ? (
-                        <>
-                          <Sparkles className="animate-spin" size={24} /> Visualizando...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles size={24} /> Crear Imagen Mágica
-                        </>
-                      )}
-                    </button>
-                 </div>
-                 
-                 <div className="mt-8 flex items-center justify-center gap-3 text-rose-300/50 text-[10px] font-black uppercase tracking-widest">
-                    <ImageIcon size={14} /> La imagen se añadirá a la edición de tu producto
-                 </div>
+            <div className="relative z-10">
+              <div className="inline-flex p-4 bg-white/10 backdrop-blur-md rounded-full mb-8 text-rose-300 border border-white/20">
+                <Wand2 size={40} className="animate-pulse" />
               </div>
-           </div>
+              <h2 className="text-4xl md:text-5xl font-serif font-bold mb-6">Estudio Creativo IA</h2>
+              <p className="text-rose-200 max-w-xl mx-auto mb-12 font-light italic text-lg leading-relaxed">
+                "Describe el arreglo de tus sueños y nuestra IA generará una imagen profesional para tu tienda."
+              </p>
+
+              <div className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 space-y-6">
+                <textarea
+                  className="w-full bg-transparent border-none text-white text-xl font-light placeholder:text-white/20 outline-none resize-none h-32"
+                  placeholder="Ej. Un bouquet de rosas preservadas azules y plateadas en una caja de lujo negra con cintas de terciopelo..."
+                  value={aiPrompt}
+                  onChange={e => setAiPrompt(e.target.value)}
+                />
+
+                <button
+                  onClick={handleAiInspiration}
+                  disabled={isGenerating || !aiPrompt}
+                  className="w-full py-5 bg-white text-rose-900 rounded-[2rem] font-black uppercase tracking-[0.3em] hover:bg-rose-100 transition-all shadow-xl disabled:opacity-50 flex items-center justify-center gap-3 active:scale-95"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Sparkles className="animate-spin" size={24} /> Visualizando...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={24} /> Crear Imagen Mágica
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-8 flex items-center justify-center gap-3 text-rose-300/50 text-[10px] font-black uppercase tracking-widest">
+                <ImageIcon size={14} /> La imagen se añadirá a la edición de tu producto
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -391,20 +468,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <h2 className="text-2xl font-serif font-bold text-gray-900">Seguridad</h2>
               <p className="text-gray-500 text-sm font-light">Control de acceso al jardín</p>
             </div>
-            
+
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Nueva Contraseña Maestra</label>
-                <input 
+                <input
                   type="password"
                   className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:bg-white focus:ring-2 focus:ring-rose-200 outline-none transition-all"
                   placeholder="••••••••"
                   onChange={e => setInputPassword(e.target.value)}
                 />
               </div>
-              <button 
+              <button
                 onClick={() => {
-                  if(inputPassword) {
+                  if (inputPassword) {
                     onUpdatePassword(inputPassword);
                     alert("Contraseña actualizada con éxito");
                   }
@@ -419,21 +496,170 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       )}
 
       {/* Inputs Ocultos para Multimedia - Se usa display:none para mejor compatibilidad con triggers programáticos */}
-      <input 
-        type="file" 
-        style={{ display: 'none' }} 
-        ref={uploadInputRef} 
-        accept="image/*" 
-        onChange={e => e.target.files?.[0] && processFile(e.target.files[0])} 
+      <input
+        type="file"
+        style={{ display: 'none' }}
+        ref={uploadInputRef}
+        accept="image/*"
+        onChange={e => e.target.files?.[0] && processFile(e.target.files[0])}
       />
-      <input 
-        type="file" 
-        style={{ display: 'none' }} 
-        ref={cameraInputRef} 
-        accept="image/*" 
+      <input
+        type="file"
+        style={{ display: 'none' }}
+        ref={cameraInputRef}
+        accept="image/*"
         capture="environment"
-        onChange={e => e.target.files?.[0] && processFile(e.target.files[0])} 
+        onChange={e => e.target.files?.[0] && processFile(e.target.files[0])}
       />
+
+      {/* Camera Modal */}
+      {isCameraOpen && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4">
+          <div className="relative w-full max-w-lg bg-black rounded-3xl overflow-hidden shadow-2xl border border-gray-800">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="w-full h-[60vh] object-cover bg-gray-900"
+            />
+            <canvas ref={canvasRef} className="hidden" />
+
+            <button
+              onClick={stopCamera}
+              className="absolute top-4 right-4 p-2 bg-black/50 text-white rounded-full hover:bg-red-900/50 transition-colors"
+            >
+              <X size={24} />
+            </button>
+
+            <div className="absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-black via-black/50 to-transparent flex flex-col items-center gap-4">
+
+              {isAnalyzing && (
+                <div className="bg-black/80 text-white px-6 py-4 rounded-xl flex items-center gap-3 backdrop-blur-md border border-rose-500/50 mb-4 animate-pulse shadow-2xl shadow-rose-900/50">
+                  <Sparkles className="animate-spin text-rose-400" size={24} />
+                  <div className="text-left">
+                    <p className="text-sm font-bold uppercase tracking-widest text-rose-200">Analizando...</p>
+                    <p className="text-[10px] text-gray-400">Conectando con el Arquitecto Floral</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-6 items-center">
+                {/* Main Capture Button */}
+                <button
+                  onClick={capturePhoto}
+                  className="p-1 rounded-full border-4 border-white/30 hover:scale-105 transition-transform"
+                >
+                  <div className="w-16 h-16 bg-white rounded-full border-4 border-black shadow-lg" />
+                </button>
+
+                {/* Manual Re-Analyze Trigger (Only if image exists but no result yet) */}
+                {!isAnalyzing && !analysisResult && (
+                  <button
+                    onClick={() => {
+                      if (canvasRef.current) {
+                        const base64 = canvasRef.current.toDataURL('image/jpeg', 0.85);
+                        setIsAnalyzing(true);
+                        analyzeFloralImage(base64)
+                          .then(result => {
+                            setAnalysisResult(result);
+                            setIsAnalyzing(false);
+                          })
+                          .catch(err => {
+                            alert(`Error manual: ${err}`);
+                            setAnalysisResult(`Error: ${err}`);
+                            setIsAnalyzing(false);
+                          });
+                      } else {
+                        alert("Primero captura una foto.");
+                      }
+                    }}
+                    className="p-3 rounded-full bg-white/10 hover:bg-rose-600 transition-colors border border-white/20 text-white"
+                    title="Forzar Análisis"
+                  >
+                    <Wand2 size={24} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Analysis Result Overlay */}
+            {analysisResult && (
+              <div className="absolute inset-x-4 bottom-24 top-20 bg-black/90 backdrop-blur-xl rounded-2xl border border-white/10 p-6 overflow-y-auto animate-fade-in-up flex flex-col">
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="text-xl font-serif font-bold text-rose-300 flex items-center gap-2">
+                    <Sparkles size={20} /> Visión del Arquitecto
+                  </h3>
+                  <button
+                    onClick={() => setAnalysisResult(null)}
+                    className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
+                  >
+                    <X size={16} className="text-white" />
+                  </button>
+                </div>
+
+                <div className="prose prose-invert prose-sm max-w-none font-light text-gray-300 whitespace-pre-wrap flex-1 overflow-y-auto mb-4">
+                  {analysisResult}
+                </div>
+
+                {/* Refinement Section */}
+                <div className="mt-auto space-y-3 pt-4 border-t border-white/10">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Ej. Hazlo más morado, quita el jarrón..."
+                      className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-rose-500 transition-colors pr-12"
+                      value={refinementText}
+                      onChange={e => setRefinementText(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && refinementText.trim() && !isAnalyzing) {
+                          setIsAnalyzing(true);
+                          refineFloralPrompt(newProduct.image || '', analysisResult, refinementText)
+                            .then(result => {
+                              setAnalysisResult(result);
+                              setRefinementText('');
+                              setIsAnalyzing(false);
+                            });
+                        }
+                      }}
+                    />
+                    <button
+                      disabled={!refinementText.trim() || isAnalyzing}
+                      onClick={() => {
+                        setIsAnalyzing(true);
+                        refineFloralPrompt(newProduct.image || '', analysisResult, refinementText)
+                          .then(result => {
+                            setAnalysisResult(result);
+                            setRefinementText('');
+                            setIsAnalyzing(false);
+                          });
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-rose-600 rounded-lg text-white hover:bg-rose-700 disabled:opacity-50 transition-all"
+                    >
+                      {isAnalyzing ? <RefreshCw className="animate-spin" size={14} /> : <Send size={14} />}
+                    </button>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                      {isAnalyzing ? "Refinando..." : "Refinar resultado"}
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(analysisResult);
+                        alert("Prompt copiado al portapapeles ✨");
+                      }}
+                      className="px-4 py-2 bg-white/10 text-white text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-white/20 transition-colors"
+                    >
+                      Copiar Todo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <p className="text-gray-400 mt-4 text-xs font-bold uppercase tracking-widest">Ajusta tu encuadre y captura</p>
+        </div>
+      )}
     </div>
   );
 };
