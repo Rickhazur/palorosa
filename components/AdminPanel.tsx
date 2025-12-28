@@ -233,7 +233,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-rose-100">
           {[
             { id: 'inventory', label: 'Inventario', icon: <ImageIcon size={16} /> },
-            { id: 'studio', label: 'Estudio IA', icon: <Wand2 size={16} /> },
             { id: 'settings', label: 'Seguridad', icon: <Lock size={16} /> }
           ].map(tab => (
             <button
@@ -263,7 +262,67 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Media Capture Section */}
               <div className="lg:col-span-4 space-y-4">
                 <div
-                  onClick={startCamera}
+                  onClick={async () => {
+                    if (newProduct.image) {
+                      try {
+                        // 1. Prepare Image for Clipboard
+                        const response = await fetch(newProduct.image);
+                        const blob = await response.blob();
+
+                        await navigator.clipboard.write([
+                          new ClipboardItem({
+                            [blob.type]: blob
+                          })
+                        ]);
+
+                        // 2. Open Gemini with Prompt in URL
+                        // Note: We use the system prompt defined in prompts.ts
+                        // Better: Use the imported constant if available, or just the text the user wants. 
+                        // Since I can't easily see the import in this chunk, I will copy the prompt text here for reliability 
+                        // OR rely on the import I see at the top of the file in previous views. 
+                        // Analysis showed `import { ... } from '../services/geminiService';` but prompts might not be imported.
+                        // I will add the import or hardcode the prompt string here to ensure it works properly without import errors.
+
+                        const fullPrompt = `### System Role & Persona
+You are **"FloraVision,"** an elite Floral Designer, Master Botanist, and AI Art Director specializing in high-end commercial floristry and photorealistic digital art.
+
+### Context & Objective
+Your goal is to take this input image and transform it into a **spectacular, high-fidelity text-to-image prompt**.
+
+### Step-by-Step Instructions
+1.  **Analyze the Input Image**: Flowers, color palette, style, lighting.
+2.  **Enhance & Elevate**: Add luxury adjectives (dew-kissed, velvety, etc.).
+3.  **Generate the Output**: Create **three (3)** distinct variations.
+
+### Output Constraints
+- Language: English for prompts, Spanish for analysis.
+- Format:
+**Analysis (Spanish)**
+**Option 1: Commercial**
+**Option 2: Cinematic**
+**Option 3: Macro**`;
+
+                        const url = `https://gemini.google.com/app?text=${encodeURIComponent(fullPrompt)}`;
+                        window.open(url, '_blank');
+
+                        alert("✅ Imagen copiada al portapapeles.\n1. Pega la imagen en Gemini (Ctrl+V).\n2. El prompt ya está escrito.\n3. ¡Genera!");
+
+                        // Also show the "Upload Result" overlay so they can put it back
+                        // We can trigger the modal state without camera just for the "Upload" button visibility?
+                        // Or we just rely on the Gallery button? 
+                        // The user said: "yo escojo la foto y eso es la que reemplaza la original". 
+                        // So we should probably keep the "Upload Result" UI accessible. 
+                        // Let's show a special 'Waiting for AI' mode or just keep it simple.
+
+                      } catch (err) {
+                        console.error("Clipboard Error:", err);
+                        alert("No se pudo copiar la imagen automáticamente. Intenta descargarla o subirla manualmente.");
+                        window.open('https://gemini.google.com/app', '_blank');
+                      }
+                    } else {
+                      startCamera();
+                    }
+                  }}
                   className="aspect-square bg-rose-50 rounded-[2.5rem] border-2 border-dashed border-rose-200 overflow-hidden relative group cursor-pointer"
                 >
                   {newProduct.image ? (
@@ -275,9 +334,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
                   )}
 
-                  <div className="absolute inset-0 bg-rose-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                    <div className="p-4 bg-white text-rose-600 rounded-full hover:scale-110 transition-transform shadow-xl">
-                      <Camera size={24} />
+                  <div className="absolute inset-0 bg-rose-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-4 text-white">
+                    <p className="font-bold text-xs uppercase tracking-widest">Click para Gemini</p>
+                    <div className="p-4 bg-white text-rose-600 rounded-full shadow-xl">
+                      <Sparkles size={24} />
                     </div>
                   </div>
                 </div>
@@ -293,9 +353,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     onClick={() => uploadInputRef.current?.click()}
                     className="flex items-center justify-center gap-2 py-3 px-4 bg-rose-50 text-rose-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-colors"
                   >
-                    <Upload size={14} /> Galería
+                    <Upload size={14} /> Galería / Resultado
                   </button>
                 </div>
+                {/* Dedicated Return Button */}
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) {
+                        processFile(e.target.files[0]);
+                        alert("¡Imagen actualizada! ✨");
+                      }
+                    }}
+                  />
+                  <button className="w-full py-3 bg-gradient-to-r from-gray-900 to-black text-rose-200 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:shadow-lg transition-all flex items-center justify-center gap-2 border border-rose-900/30">
+                    <Wand2 size={14} /> Reemplazar con Imagen IA
+                  </button>
+                </div>
+
+                {/* LINK DIRECTO GEMINI (SOLICITUD USUARIO) */}
+                <div className="text-center pt-2">
+                  <button
+                    onClick={async () => {
+                      if (!newProduct.image) {
+                        alert("Primero sube una foto de referencia.");
+                        return;
+                      }
+                      try {
+                        const response = await fetch(newProduct.image);
+                        const blob = await response.blob();
+                        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+
+                        const geminiPrompt = "You are an elite floral photographer. Look at this reference image. Generate 4 SPECTACULAR, high-fidelity, photorealistic variations of this arrangement for a sales catalog. Styles: 1. Luxury Commercial (Clean background), 2. Dramatic/Moody (Cinematic lighting), 3. Lifestyle (In a beautiful home), 4. Macro Detail. Quality: 8k, Ultra-realistic.";
+                        const url = `https://gemini.google.com/app?text=${encodeURIComponent(geminiPrompt)}`;
+                        window.open(url, '_blank');
+                        alert("✅ Imagen copiada. ¡Pégala en Gemini (Ctrl+V) y dale Enter!");
+                      } catch (e) {
+                        alert("No se pudo copiar la imagen. Descárgala primero.");
+                        window.open("https://gemini.google.com/app", "_blank");
+                      }
+                    }}
+                    className="text-rose-500 hover:text-rose-700 text-xs font-bold underline cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    <Sparkles size={12} /> Link: Generar 4 Variaciones en Gemini
+                  </button>
+                </div>
+
                 <p className="text-[10px] text-gray-400 text-center uppercase tracking-widest font-bold">Resonancia floral en cada captura</p>
               </div>
 
@@ -409,54 +515,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {activeTab === 'studio' && (
-        <div className="max-w-4xl mx-auto animate-fade-in-up">
-          <div className="bg-rose-950 p-10 md:p-16 rounded-[4rem] text-center text-white relative overflow-hidden shadow-2xl">
-            <div className="absolute inset-0 opacity-10 pointer-events-none">
-              <div className="absolute top-0 left-0 w-full h-full" style={{ backgroundImage: 'radial-gradient(white 1px, transparent 0px)', backgroundSize: '40px 40px' }}></div>
-            </div>
 
-            <div className="relative z-10">
-              <div className="inline-flex p-4 bg-white/10 backdrop-blur-md rounded-full mb-8 text-rose-300 border border-white/20">
-                <Wand2 size={40} className="animate-pulse" />
-              </div>
-              <h2 className="text-4xl md:text-5xl font-serif font-bold mb-6">Estudio Creativo IA</h2>
-              <p className="text-rose-200 max-w-xl mx-auto mb-12 font-light italic text-lg leading-relaxed">
-                "Describe el arreglo de tus sueños y nuestra IA generará una imagen profesional para tu tienda."
-              </p>
-
-              <div className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 space-y-6">
-                <textarea
-                  className="w-full bg-transparent border-none text-white text-xl font-light placeholder:text-white/20 outline-none resize-none h-32"
-                  placeholder="Ej. Un bouquet de rosas preservadas azules y plateadas en una caja de lujo negra con cintas de terciopelo..."
-                  value={aiPrompt}
-                  onChange={e => setAiPrompt(e.target.value)}
-                />
-
-                <button
-                  onClick={handleAiInspiration}
-                  disabled={isGenerating || !aiPrompt}
-                  className="w-full py-5 bg-white text-rose-900 rounded-[2rem] font-black uppercase tracking-[0.3em] hover:bg-rose-100 transition-all shadow-xl disabled:opacity-50 flex items-center justify-center gap-3 active:scale-95"
-                >
-                  {isGenerating ? (
-                    <>
-                      <Sparkles className="animate-spin" size={24} /> Visualizando...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={24} /> Crear Imagen Mágica
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="mt-8 flex items-center justify-center gap-3 text-rose-300/50 text-[10px] font-black uppercase tracking-widest">
-                <ImageIcon size={14} /> La imagen se añadirá a la edición de tu producto
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {activeTab === 'settings' && (
         <div className="max-w-md mx-auto py-12">
@@ -597,8 +656,121 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </button>
                 </div>
 
-                <div className="prose prose-invert prose-sm max-w-none font-light text-gray-300 whitespace-pre-wrap flex-1 overflow-y-auto mb-4">
-                  {analysisResult}
+                <div className="flex-1 overflow-y-auto space-y-6 mb-4 pr-2">
+                  {(() => {
+                    // Simple parser for the structured response
+                    const sections = analysisResult.split(/\*\*(Option \d+|Analysis|Análisis).*?\*\*:/g).filter(s => s.trim());
+                    // The split might keep the delimiters or not depending on browser regex implementation with capturing groups, 
+                    // but since we didn't use capturing groups for the whole delimiter in a way that preserves it usually in simple splits, 
+                    // let's try a robust approach: matching the headers.
+
+                    // Actually, let's just parse manually for robustness
+                    const parts = [];
+                    const lines = analysisResult.split('\n');
+                    let currentSection = { title: 'Intro', content: '' };
+
+                    lines.forEach(line => {
+                      if (line.includes('**Analysis') || line.includes('**Análisis')) {
+                        if (currentSection.content.trim()) parts.push(currentSection);
+                        currentSection = { title: 'Análisis Visual', content: '' };
+                      } else if (line.includes('**Option 1') || line.includes('Option 1:')) {
+                        if (currentSection.content.trim()) parts.push(currentSection);
+                        currentSection = { title: 'Opción 1: Comercial Hiper-Realista', content: '' };
+                      } else if (line.includes('**Option 2') || line.includes('Option 2:')) {
+                        if (currentSection.content.trim()) parts.push(currentSection);
+                        currentSection = { title: 'Opción 2: Cinemático/Moody', content: '' };
+                      } else if (line.includes('**Option 3') || line.includes('Option 3:')) {
+                        if (currentSection.content.trim()) parts.push(currentSection);
+                        currentSection = { title: 'Opción 3: Macro/Detalle', content: '' };
+                      } else {
+                        currentSection.content += line + '\n';
+                      }
+                    });
+                    if (currentSection.content.trim()) parts.push(currentSection);
+
+                    return parts.map((part, idx) => (
+                      <div key={idx} className={`p-4 rounded-xl border ${part.title.includes('Opción') ? 'bg-white/5 border-rose-500/30' : 'bg-transparent border-transparent'}`}>
+                        <h4 className="text-sm font-bold text-rose-200 uppercase tracking-widest mb-2">{part.title}</h4>
+                        <p className="text-gray-300 text-sm font-light leading-relaxed whitespace-pre-wrap">{part.content.trim()}</p>
+
+                        {part.title.includes('Opción') && (
+                          <div className="flex flex-col gap-2 mt-3">
+                            {/* BOTÓN MÁGICO INTERNO */}
+                            <button
+                              onClick={async () => {
+                                const promptText = part.content.trim();
+                                setIsAnalyzing(true); // Re-use analyzing loader
+                                alert("🌸 Taller Mágico: Creando tu imagen... Esto tomará unos segundos.");
+                                try {
+                                  // Use the internal service
+                                  const magicImage = await generateFloralInspiration(promptText);
+                                  if (magicImage) {
+                                    if (editingId) {
+                                      setEditFields(prev => ({ ...prev, image: magicImage }));
+                                    } else {
+                                      setNewProduct(prev => ({ ...prev, image: magicImage }));
+                                    }
+                                    setAnalysisResult(null);
+                                    setIsCameraOpen(false);
+                                    alert("¡Imagen Creada Exitosamente! ✨");
+                                  } else {
+                                    alert("No se pudo generar. Verifica tu API Key o intenta con el enlace externo.");
+                                  }
+                                } catch (e) {
+                                  console.error(e);
+                                  alert("Error en la generación mágica.");
+                                }
+                                setIsAnalyzing(false);
+                              }}
+                              className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-800 rounded-lg text-white text-xs font-bold uppercase tracking-widest hover:from-emerald-500 hover:to-teal-700 transition-all shadow-lg flex items-center justify-center gap-2 border border-emerald-400/30 animate-pulse"
+                            >
+                              <Wand2 size={16} /> ✨ Generar Aquí (Magic)
+                            </button>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => {
+                                  const promptText = part.content.trim();
+                                  navigator.clipboard.writeText(promptText);
+                                  const url = `https://gemini.google.com/app?text=${encodeURIComponent(promptText)}`;
+                                  window.open(url, '_blank');
+                                }}
+                                className="w-full py-3 bg-white/5 border border-white/20 rounded-lg text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                              >
+                                <Sparkles size={12} /> Gemini Externo
+                              </button>
+
+                              <div className="relative overflow-hidden group">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                  onChange={(e) => {
+                                    if (e.target.files?.[0]) {
+                                      const file = e.target.files[0];
+                                      const reader = new FileReader();
+                                      reader.onload = (ev) => {
+                                        const result = ev.target?.result as string;
+                                        if (editingId) setEditFields(prev => ({ ...prev, image: result }));
+                                        else setNewProduct(prev => ({ ...prev, image: result }));
+                                        setAnalysisResult(null);
+                                        setIsCameraOpen(false);
+                                        alert("¡Imagen reemplazada! ✨");
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }
+                                  }}
+                                />
+                                <button className="w-full h-full bg-white/5 border border-white/20 rounded-lg text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all flex items-center justify-center gap-2">
+                                  <Upload size={12} /> Subir Archivo
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ));
+                  })()}
                 </div>
 
                 {/* Refinement Section */}
@@ -636,21 +808,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-rose-600 rounded-lg text-white hover:bg-rose-700 disabled:opacity-50 transition-all"
                     >
                       {isAnalyzing ? <RefreshCw className="animate-spin" size={14} /> : <Send size={14} />}
-                    </button>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                      {isAnalyzing ? "Refinando..." : "Refinar resultado"}
-                    </span>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(analysisResult);
-                        alert("Prompt copiado al portapapeles ✨");
-                      }}
-                      className="px-4 py-2 bg-white/10 text-white text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-white/20 transition-colors"
-                    >
-                      Copiar Todo
                     </button>
                   </div>
                 </div>

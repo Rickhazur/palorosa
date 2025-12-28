@@ -128,7 +128,7 @@ export const refineFloralPrompt = async (base64Image: string, previousResponse: 
         },
         {
           role: 'user',
-          parts: [{ text: `INSTRUCCIÓN DE REFINAMIENTO: ${instruction}\n\nPor favor, actualiza el Análisis y los Prompts (Inglés y Español) incorporando estrictamente esta nueva instrucción. Mantén el formato estructurado.` }]
+          parts: [{ text: `INSTRUCCIÓN DE REFINAMIENTO: ${instruction}\n\nPor favor, actualiza el Análisis y los tres (3) Prompts (Option 1, Option 2, Option 3) incorporando estrictamente esta nueva instrucción. Mantén el formato estructurado.` }]
         }
       ]
     });
