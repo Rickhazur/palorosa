@@ -1,71 +1,65 @@
-  // pages/api/gemini-generate.ts
+// components/ImageUploader.tsx
+import React, { useState } from 'react';
 
-import { NextApiRequest, NextApiResponse } from 'next';
-import axios from 'axios';
-import formidable from 'formidable';
-import fs from 'fs';
+export default function ImageUploader() {
+  const [preview, setPreview] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPreview(URL.createObjectURL(file));
+    setImages([]);
+  };
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Método no permitido' });
-  }
+  const handleGenerate = async () => {
+    if (!preview) return;
 
-  const form = new formidable.IncomingForm();
+    const input = document.querySelector('input[type=file]') as HTMLInputElement;
+    if (!input?.files?.[0]) return;
 
-  form.parse(req, async (err, fields, files) => {
-    if (err) {
-      return res.status(500).json({ error: 'Error al procesar la imagen' });
-    }
-
-    const imageFile = files.image as formidable.File;
-    const imageBuffer = fs.readFileSync(imageFile.filepath);
+    setLoading(true);
+    const formData = new FormData();
+    formData.append('image', input.files[0]);
 
     try {
-      // Llamada a la API de Gemini (ejemplo usando Vertex AI o REST API)
-      const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          contents: [
-            {
-              parts: [
-                {
-                  text: 'Genera 4 variantes creativas de este arreglo floral.',
-                },
-                {
-                  inlineData: {
-                    mimeType: imageFile.mimetype,
-                    data: imageBuffer.toString('base64'),
-                  },
-                },
-              ],
-            },
-          ],
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const res = await fetch('/api/gemini', {
+        method: 'POST',
+        body: formData,
+      });
 
-      // Simulamos que recibimos 4 URLs de imágenes generadas
-      const mockImageUrls = [
-        'https://via.placeholder.com/200x200?text=Imagen+1',
-        'https://via.placeholder.com/200x200?text=Imagen+2',
-        'https://via.placeholder.com/200x200?text=Imagen+3',
-        'https://via.placeholder.com/200x200?text=Imagen+4',
-      ];
-
-      res.status(200).json({ imageUrls: mockImageUrls });
+      const data = await res.json();
+      if (data.images) {
+        setImages(data.images);
+      } else {
+        alert('No se recibieron imágenes generadas.');
+      }
     } catch (error) {
+      alert('Error al generar imágenes.');
       console.error(error);
-      res.status(500).json({ error: 'Error al llamar a Gemini' });
+    } finally {
+      setLoading(false);
     }
-  });
+  };
+
+  return (
+    <div>
+      <h2>Sube una imagen floral</h2>
+      <input type="file" accept="image/*" onChange={handleFileChange} />
+      {preview && <img src={preview} alt="Preview" style={{ width: 300, marginTop: 10 }} />}
+      {preview && (
+        <div>
+          <button onClick={handleGenerate} disabled={loading} style={{ marginTop: 10 }}>
+            {loading ? 'Generando...' : 'Generar 4 variantes con IA'}
+          </button>
+        </div>
+      )}
+      <div style={{ marginTop: 20, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {images.map((img, i) => (
+          <img key={i} src={img} alt={`Variante ${i + 1}`} style={{ width: 200 }} />
+        ))}
+      </div>
+    </div>
+  );
 }
